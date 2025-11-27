@@ -243,8 +243,14 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
             metadata.setContentType("text/csv");
             metadata.setContentLength(bytesOutput.length);
 
-            s3Client.putObject(BUCKET_CLIENT, OUTPUT_FILENAME, inputStreamUpload, metadata);
-            context.getLogger().log("Dashboard gerado com sucesso em: " + BUCKET_CLIENT + "/" + OUTPUT_FILENAME);
+            String pastaDestino = "dashBateria/";
+
+            s3Client.putObject(
+                    BUCKET_CLIENT,
+                    pastaDestino + OUTPUT_FILENAME,
+                    inputStreamUpload,
+                    metadata
+            );            context.getLogger().log("Dashboard gerado com sucesso em: " + BUCKET_CLIENT + "/" + pastaDestino + OUTPUT_FILENAME);
 
             // 4.2. Envio do CSV de Histórico
             byte[] bytesHistoricoOutput = csvHistoricoOutput.toString().getBytes(StandardCharsets.UTF_8);
@@ -254,8 +260,12 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
             metadataHistorico.setContentType("text/csv");
             metadataHistorico.setContentLength(bytesHistoricoOutput.length);
 
-            s3Client.putObject(BUCKET_CLIENT, HISTORICO_FILENAME, inputStreamHistoricoUpload, metadataHistorico);
-            context.getLogger().log("Histórico de Leituras gerado com sucesso em: " + BUCKET_CLIENT + "/" + HISTORICO_FILENAME);
+            s3Client.putObject(
+                    BUCKET_CLIENT,
+                    pastaDestino + HISTORICO_FILENAME,
+                    inputStreamHistoricoUpload,
+                    metadataHistorico
+            );            context.getLogger().log("Histórico de Leituras gerado com sucesso em: " + BUCKET_CLIENT + "/" + HISTORICO_FILENAME);
 
 
             return "Sucesso: Dashboard e Histórico atualizados.";
