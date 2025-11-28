@@ -21,16 +21,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
 
     // Criação do cliente S3
     private final AmazonS3 s3Client = AmazonS3ClientBuilder.defaultClient();
 
-    // Nome do bucket e arquivos de destino
-    private static final String BUCKET_CLIENT = "s3clientnavix-20251107102936-7403";
-    private static final String OUTPUT_FILENAME = "dashboard_bateria.csv";
-    private static final String HISTORICO_FILENAME = "historico_leituras.csv";
+    // Nome do bucket
+    private static final String BUCKET_CLIENT = "bucket-navix-client";
 
     // Classe auxiliar para agrupar dados
     static class ModelStats {
@@ -92,7 +92,7 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
                 return resultado;
             }
 
-            // 2. Se NÃO: Sorteia e Insere (Apenas se houver modelos disponíveis sem MAC)
+            // Se NÃO achar: Sorteia e Insere (Apenas se houver modelos disponíveis sem MAC)
             if (modelosDisponiveis.isEmpty()) {
                 context.getLogger().log("Aviso: Nenhum modelo disponível para sorteio/associação. MAC não mapeado.");
                 return resultado;
@@ -104,7 +104,7 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
             String idSorteado = idsDisponiveis.get(rand.nextInt(idsDisponiveis.size()));
             String nomeSorteado = modelosDisponiveis.get(idSorteado);
 
-            // 3. Inserir o novo par (MAC + ID do Modelo Sorteado) no BD
+            // Insere o novo par (MAC + ID do Modelo Sorteado) no BD
             String sqlUpdate = "UPDATE modelo SET mac_address = ? WHERE id = ? AND (mac_address IS NULL OR mac_address = '');";
             java.sql.PreparedStatement psUpdate = conn.prepareStatement(sqlUpdate);
             psUpdate.setString(1, mac);
@@ -122,7 +122,6 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
             resultado.put("id", idSorteado);
             resultado.put("nome", nomeSorteado);
 
-
         } catch (Exception e) {
             context.getLogger().log("Erro ao buscar/criar modelo por MAC: " + e.getMessage());
         } finally {
@@ -134,7 +133,7 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
     // --- METODO PRINCIPAL DA LAMBDA ---
     @Override
     public String handleRequest(S3Event s3Event, Context context) {
-        // 0. Inicializa os modelos disponíveis
+        // Inicializa os modelos disponíveis
         Map<String, String> modelosDisponiveis = buscarModelosDisponiveis(context);
 
         // Mapa para agrupar os dados por MODELO (CSV de Dashboard)
@@ -147,13 +146,13 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
         csvHistoricoOutput.append("MAC,Modelo,TIMESTAMP,velocidadeEstimada,consumoEnergia,TEMP\n");
 
         try {
-            // 1. Obter informações do evento S3 bucket trusted
+            // Obter informações do evento S3 bucket trusted
             String sourceBucket = s3Event.getRecords().get(0).getS3().getBucket().getName();
             String sourceKey = s3Event.getRecords().get(0).getS3().getObject().getKey();
 
             context.getLogger().log("Iniciando processamento do arquivo: " + sourceKey);
 
-            // 2. Ler o arquivo CSV
+            // Ler o arquivo CSV
             InputStream s3InputStream = s3Client.getObject(sourceBucket, sourceKey).getObjectContent();
             BufferedReader reader = new BufferedReader(new InputStreamReader(s3InputStream, StandardCharsets.UTF_8));
 
@@ -235,6 +234,11 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
 
             // 4. Preparar e Enviar para o Bucket de Destino Client
 
+            // --- NOVO: gerar nomes com dia e hora ---
+            String dataHora = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            String outputFilename = "dashboard_bateria_" + dataHora + ".csv";
+            String historicoFilename = "historico_leituras_" + dataHora + ".csv";
+
             // 4.1. Envio do CSV de Dashboard
             byte[] bytesOutput = csvOutput.toString().getBytes(StandardCharsets.UTF_8);
             InputStream inputStreamUpload = new ByteArrayInputStream(bytesOutput);
@@ -247,10 +251,12 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
 
             s3Client.putObject(
                     BUCKET_CLIENT,
-                    pastaDestino + OUTPUT_FILENAME,
+                    pastaDestino + outputFilename,
                     inputStreamUpload,
                     metadata
-            );            context.getLogger().log("Dashboard gerado com sucesso em: " + BUCKET_CLIENT + "/" + pastaDestino + OUTPUT_FILENAME);
+            );
+            context.getLogger().log("Dashboard gerado com sucesso em: "
+                    + BUCKET_CLIENT + "/" + pastaDestino + outputFilename);
 
             // 4.2. Envio do CSV de Histórico
             byte[] bytesHistoricoOutput = csvHistoricoOutput.toString().getBytes(StandardCharsets.UTF_8);
@@ -262,11 +268,12 @@ public class EtlDashboardBateria implements RequestHandler<S3Event, String> {
 
             s3Client.putObject(
                     BUCKET_CLIENT,
-                    pastaDestino + HISTORICO_FILENAME,
+                    pastaDestino + historicoFilename,
                     inputStreamHistoricoUpload,
                     metadataHistorico
-            );            context.getLogger().log("Histórico de Leituras gerado com sucesso em: " + BUCKET_CLIENT + "/" + HISTORICO_FILENAME);
-
+            );
+            context.getLogger().log("Histórico de Leituras gerado com sucesso em: "
+                    + BUCKET_CLIENT + "/" + pastaDestino + historicoFilename);
 
             return "Sucesso: Dashboard e Histórico atualizados.";
 
